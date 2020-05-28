@@ -5,6 +5,7 @@ project(WebServer)
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-std=c++17 -pthread")
 
 # Find all executables
+include_directories(include)
 file(GLOB project_SRCS src/*.cpp) #src/*.h
 
 # Add project executable
