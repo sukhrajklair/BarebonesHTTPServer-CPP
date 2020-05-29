@@ -8,7 +8,7 @@
 #include <string>
 #include <sstream>
 
-#include "tcpListener.h"
+#include "httpServer.h"
 
 using namespace std;
 
@@ -20,14 +20,10 @@ int main(int argc, char* argv[]){
     std::istringstream ss(argv[2]);
     int port;
     ss >> port;
-    TcpListener server(ipAddress, port, Listener_MessageReceived);
+    httpServer server(ipAddress, port);
     
-    server.Run();
+    server.start();
 
     return 0;
 }
-void Listener_MessageReceived(TcpListener* listener, int client, std::string msg)
-{
-    std::cout << "thread: " << std::this_thread::get_id() << std::endl;
-    listener->Send(client, msg);
-}
+
