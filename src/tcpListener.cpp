@@ -1,4 +1,6 @@
 #include "tcpListener.h"
+#include <algorithm>
+#include <sstream>
 
 #define MAX_BUFFER_SIZE (49152)
 
@@ -9,7 +11,12 @@ TcpListener::TcpListener(std::string ipAddress, int port, MessageReceivedHandler
 }
 TcpListener::~TcpListener()
 {
-    Cleanup();
+    //wait for all client connections to close
+    std::for_each(_clients.begin(), _clients.end(), [](auto& futr) {
+        futr.wait();
+    });
+    //close listening socket
+    close(_listening);
 }
 
 void TcpListener::Send(int clientSocket, std::string msg)
@@ -19,42 +26,49 @@ void TcpListener::Send(int clientSocket, std::string msg)
 
 void TcpListener::Run()
 {
-    char buf[MAX_BUFFER_SIZE];
-
+    std::cout << "thread: " << std::this_thread::get_id() << std::endl;
+    //create a listening socket
+    _listening = CreateSocket();
+    if (_listening < 0)
+    {
+        return;
+    }
     while (true)
     {
-        //create a listening socket
-        int listening = CreateSocket();
-        if (listening < 0)
-        {
-            break;
-        }
+        
         //wait for connection
-        int clientSocket = WaitForConnection(listening);
+        auto clientInfo = WaitForConnection(_listening);
+        int clientSocket = std::get<0>(clientInfo);
         if (clientSocket != 1)
         {
-            //close listening socket to prevent another connection
-            close(listening);
-            int bytesReceived = 0;
-            do
-            {
-                memset(buf, 0 , MAX_BUFFER_SIZE);
-                bytesReceived = recv(clientSocket, buf, MAX_BUFFER_SIZE, 0);
-                if (bytesReceived > 0)
-                {
-                    if (_messageReceived != NULL)
-                    {
-                        _messageReceived(this, clientSocket, std::string(buf, 0, bytesReceived));
-                    }
-                }
-            } while (bytesReceived > 0);
-            std::cout << "Client Disconnected" << std::endl;
-            close(clientSocket);
+            _clients.emplace_back(std::async(&TcpListener::Communicate, this, std::move(clientInfo)));
         }
     
     }
 }
-
+void TcpListener::Communicate(std::tuple<int, sockaddr_in, socklen_t>&& clientInfo)
+{   
+    std::cout << "thread: " << std::this_thread::get_id() << std::endl;
+    std::string clientInfoStr = ClientInfo(clientInfo);
+    std::cout << "Connected to " <<  clientInfoStr << std::endl;
+    int clientSocket = std::get<0>(clientInfo);
+    char buf[MAX_BUFFER_SIZE];
+    int bytesReceived = 0;
+    do
+    {
+        memset(buf, 0 , MAX_BUFFER_SIZE);
+        bytesReceived = recv(clientSocket, buf, MAX_BUFFER_SIZE, 0);
+        if (bytesReceived > 0)
+        {
+            if (_messageReceived != NULL)
+            {
+                _messageReceived(this, clientSocket, std::string(buf, 0, bytesReceived));
+            }
+        }
+    } while (bytesReceived > 0);
+    std::cout << clientInfoStr << " disconnected" << std::endl;
+    close(clientSocket);
+}
 int TcpListener::CreateSocket()
 {
     /*create a socket*/
@@ -92,36 +106,39 @@ int TcpListener::CreateSocket()
     return listening;
 }
 
-int TcpListener::WaitForConnection(int listening)
+std::tuple<int, sockaddr_in, socklen_t> TcpListener::WaitForConnection(int listening)
 {
     sockaddr_in client;
     socklen_t clientSize = sizeof(client);
     //await for connection, when connected put connecting peer's address and address length into client and clientSize respectively
     int clientSocket = accept(listening, (sockaddr*)&client, &clientSize);
+    return std::make_tuple(clientSocket, client, clientSize);
+}
 
-    //if client is connected, print their information
-    if (clientSocket != -1)
+std::string TcpListener::ClientInfo(std::tuple<int, sockaddr_in, socklen_t> clientInfo)
+{
+    //buffers to store host name and service name
+    char host[NI_MAXHOST];
+    char svc[NI_MAXSERV];
+    memset(host, 0, NI_MAXHOST);
+    memset(svc, 0, NI_MAXSERV);
+    std::ostringstream oss;
+    auto clientAddr = std::get<1>(clientInfo);
+    auto clientSize = std::get<2>(clientInfo);
+    //translate socket address of client to a location and service name
+    int result = getnameinfo((sockaddr*)&clientAddr, clientSize, host, NI_MAXHOST, svc, NI_MAXSERV, 0);
+
+    if(result)
     {
-        //buffers to store host name and service name
-        char host[NI_MAXHOST];
-        char svc[NI_MAXSERV];
-        memset(host, 0, NI_MAXHOST);
-        memset(svc, 0, NI_MAXSERV);
-
-        //translate socket address of client to a location and service name
-        int result = getnameinfo((sockaddr*)&client, sizeof(client), host, NI_MAXHOST, svc, NI_MAXSERV, 0);
-
-        if(result)
-        {
-            std::cout << host << " connected on " << svc << std::endl;
-        }
-        else
-        {   
-            //if getnameinfo() wasn't successfull, then convert the network address manually to buffer using ntop
-            inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
-            std::cout << host << " connected on " << ntohs(client.sin_port) << std::endl;
-        }
+        oss << host << " port: " << svc;
     }
-    return clientSocket;
+    else
+    {   
+        //if getnameinfo() wasn't successfull, then convert the network address manually to buffer using ntop
+        inet_ntop(AF_INET, &clientAddr.sin_addr, host, NI_MAXHOST);
+        oss << host << " port: " << ntohs(clientAddr.sin_port);
+    }
+
+    return oss.str();
 }
 

@@ -28,5 +28,6 @@ int main(int argc, char* argv[]){
 }
 void Listener_MessageReceived(TcpListener* listener, int client, std::string msg)
 {
+    std::cout << "thread: " << std::this_thread::get_id() << std::endl;
     listener->Send(client, msg);
 }

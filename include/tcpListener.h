@@ -9,6 +9,10 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <string>
+#include <thread>
+#include <vector>
+#include <future>
+#include <tuple>
 
 //Forward declaration
 class TcpListener;
@@ -24,12 +28,17 @@ class TcpListener{
 
         void Run();
 
-        void Cleanup();
     private:
         int CreateSocket();
 
-        int WaitForConnection(int listening);
+        std::tuple<int, sockaddr_in, socklen_t>  WaitForConnection(int listening);
 
+        void Communicate(std::tuple<int, sockaddr_in, socklen_t> && clientInfo);
+        
+        std::string ClientInfo(std::tuple<int, sockaddr_in, socklen_t> clientInfo);
+
+        std::vector<std::future<void>> _clients;
+        int _listening;
         std::string _ipAddress;
         int _port;
         MessageReceivedHandler _messageReceived;
